@@ -1,15 +1,11 @@
 use swc_core::{
-    common::DUMMY_SP,
-    ecma::{
+    common::{BytePos, Spanned, DUMMY_SP}, ecma::{
         ast::{
-            ArrayLit, AssignExpr, AssignTarget, ClassDecl, ClassMember, Constructor, Expr,
-            ExprOrSpread, ExprStmt, Ident, Lit, MemberExpr, MemberProp, ModuleItem,
-            ParamOrTsParamProp, Pat, Program, Stmt, Str,
+            ArrayLit, AssignExpr, AssignTarget, ClassDecl, ClassMember, Constructor, Expr, ExprOrSpread, ExprStmt, Ident, Lit, MemberExpr, MemberProp, ModuleItem, ParamOrTsParamProp, Pat, Program, Stmt, Str
         },
         transforms::testing::test_inline,
         visit::{as_folder, noop_visit_mut_type, FoldWith, VisitMut, VisitMutWith},
-    },
-    plugin::{plugin_transform, proxies::TransformPluginProgramMetadata},
+    }, plugin::{plugin_transform, proxies::TransformPluginProgramMetadata}
 };
 
 fn get_param_names(c: &Constructor) -> Vec<String> {
@@ -31,9 +27,9 @@ fn array_string_member(str: &std::string::String) -> ExprOrSpread {
     ExprOrSpread::from(Expr::Lit(Lit::Str(s)))
 }
 
-fn inject_ctor_param_names(p: CtorParams) -> swc_core::ecma::ast::ExprStmt {
+fn inject_ctor_param_names(p: &CtorParams) -> swc_core::ecma::ast::ExprStmt {
     let member_expr = MemberExpr {
-        obj: Box::new(Expr::Ident(Ident::new(p.ctor.into(), DUMMY_SP))),
+        obj: Box::new(Expr::Ident(Ident::new(p.clone().ctor.into(), DUMMY_SP))),
         prop: MemberProp::Ident(Ident::new("$inject".into(), DUMMY_SP)),
         span: DUMMY_SP,
     };
@@ -64,10 +60,11 @@ fn inject_ctor_param_names(p: CtorParams) -> swc_core::ecma::ast::ExprStmt {
     }
 }
 
-
+#[derive(Clone, Debug)]
 struct CtorParams {
     ctor: String,
     params: Vec<String>,
+    end_pos: BytePos
 }
 
 #[derive(Default)]
@@ -96,6 +93,7 @@ impl VisitMut for TransformVisitor {
             v.push(CtorParams {
                 ctor: class_name,
                 params: my_params,
+                end_pos: n.span_hi()
             });
         }
     }
@@ -107,8 +105,20 @@ impl VisitMut for TransformVisitor {
 
         let injects = self.injects.pop().unwrap();
         for p in injects {
-            let expr_stmt = inject_ctor_param_names(p);
-            n.push(ModuleItem::Stmt(Stmt::Expr(expr_stmt)));
+            let x = p;
+            let expr_stmt = inject_ctor_param_names(&x);
+
+            let end_pos = x.end_pos;
+            let index_after = n.iter().position(|x: &ModuleItem| x.span_lo() > end_pos);
+
+            let element = ModuleItem::Stmt(Stmt::Expr(expr_stmt));
+            if let Some(index) = index_after {
+                n.insert(index, element);
+            }
+            else
+            {
+                n.push(element);
+            }
         }
     }
 
@@ -119,8 +129,19 @@ impl VisitMut for TransformVisitor {
 
         let injects = self.injects.pop().unwrap();
         for p in injects {
-            let expr_stmt = inject_ctor_param_names(p);
-            n.push(Stmt::Expr(expr_stmt));
+            let x = p;
+            let expr_stmt = inject_ctor_param_names(&x);
+
+            let end_pos = x.end_pos;
+            let index_after = n.iter().position(|x: &Stmt| x.span_lo() > end_pos);
+
+            let element = Stmt::Expr(expr_stmt);
+            if let Some(index) = index_after {
+                n.insert(index, element);
+            }
+            else {
+                n.push(element);
+            }
         }        
     }
 }
@@ -141,12 +162,14 @@ test_inline!(
     // Input codes
     r#"class HelloWorld { 
         constructor(a, b) { } 
-    }"#,
+    }
+    angular.component("helloWorld", HelloWorld);"#,
     // Output codes after transformed with plugin
     r#"class HelloWorld { 
         constructor(a, b) { } 
     }
-    HelloWorld.$inject = ["a", "b"];"#
+    HelloWorld.$inject = ["a", "b"];
+    angular.component("helloWorld", HelloWorld);"#
 );
 
 test_inline!(
@@ -158,12 +181,15 @@ test_inline!(
     // Input codes
     r#"(function(){class HelloWorld { 
         constructor(a, b, janus) { } 
-    }})();"#,
+    }
+    angular.component("helloWorld", HelloWorld);
+    })();"#,
     // Output codes after transformed with plugin
     r#"(function(){class HelloWorld { 
         constructor(a, b, janus) { } 
     }
     HelloWorld.$inject = ["a", "b", "janus"];
+    angular.component("helloWorld", HelloWorld);
     })();
     "#
 );
