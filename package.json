@@ -1,6 +1,6 @@
 {
     "name": "swc-ng-inject",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "description": "Automatic Angular.js $inject annotations for swc",
     "author": "Janus Tøndering <janus@toendering.dk>",
     "license": "MIT",
