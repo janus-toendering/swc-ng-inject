@@ -1,10 +1,10 @@
 use swc_core::{
-    common::{BytePos, Spanned, DUMMY_SP}, ecma::{
+    common::{BytePos, SyntaxContext, Spanned, DUMMY_SP}, ecma::{
         ast::{
             ArrayLit, AssignExpr, AssignTarget, ClassDecl, ClassMember, Constructor, Expr, ExprOrSpread, ExprStmt, Ident, Lit, MemberExpr, MemberProp, ModuleItem, ParamOrTsParamProp, Pat, Program, Stmt, Str
         },
         transforms::testing::test_inline,
-        visit::{as_folder, noop_visit_mut_type, FoldWith, VisitMut, VisitMutWith},
+        visit::{visit_mut_pass, noop_visit_mut_type, VisitMut, VisitMutWith},
     }, plugin::{plugin_transform, proxies::TransformPluginProgramMetadata}
 };
 
@@ -29,8 +29,8 @@ fn array_string_member(str: &std::string::String) -> ExprOrSpread {
 
 fn inject_ctor_param_names(p: &CtorParams) -> swc_core::ecma::ast::ExprStmt {
     let member_expr = MemberExpr {
-        obj: Box::new(Expr::Ident(Ident::new(p.clone().ctor.into(), DUMMY_SP))),
-        prop: MemberProp::Ident(Ident::new("$inject".into(), DUMMY_SP)),
+        obj: Box::new(Expr::Ident(Ident::new(p.clone().ctor.into(), DUMMY_SP, SyntaxContext::empty()))),
+        prop: MemberProp::Ident(Ident::new("$inject".into(), DUMMY_SP, SyntaxContext::empty()).into()),
         span: DUMMY_SP,
     };
 
@@ -147,15 +147,17 @@ impl VisitMut for TransformVisitor {
 }
 
 #[plugin_transform]
-pub fn process_transform(program: Program, _metadata: TransformPluginProgramMetadata) -> Program {
-    program.fold_with(&mut as_folder(TransformVisitor {
+pub fn process_transform(mut program: Program, _metadata: TransformPluginProgramMetadata) -> Program {
+    program.visit_mut_with(&mut visit_mut_pass(TransformVisitor {
         ..Default::default()
-    }))
+    }));
+
+    program
 }
 
 test_inline!(
     Default::default(),
-    |_| as_folder(TransformVisitor {
+    |_| visit_mut_pass(TransformVisitor {
         ..Default::default()
     }),
     inject1,
@@ -174,7 +176,7 @@ test_inline!(
 
 test_inline!(
     Default::default(),
-    |_| as_folder(TransformVisitor {
+    |_| visit_mut_pass(TransformVisitor {
         ..Default::default()
     }),
     inject2,
